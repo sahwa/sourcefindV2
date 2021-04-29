@@ -1,3 +1,5 @@
+#!/usr/bin/env Rscript
+
 ## This software is licenced under the "Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International Public License" (http://creativecommons.org/licenses/by/4.0/)
 ## TAKE CHROMOPAINTER OUTPUT AND FORMS THE HAPLOTYPE SHARING PATTERNS OF A TARGET GROUP AS A MIXTURE OF THAT FROM A SET OF SURROGATE GROUPS, INFERRING THE MIXTURE COEFFICIENTS USING MARKOV-CHAIN-MONTE-CARLO (MCMC) 
 ## AS DESCRIBED IN "Latin Americans show wide-spread Converso ancestry and the imprint of local Native ancestry on physical appearance" (2018) by Chacon-Duque et al (preprint: https://www.biorxiv.org/content/early/2018/01/23/252155)
@@ -9,6 +11,11 @@
 
 ########################################
 ## COMMAND LINE INPUT:
+
+#library("data.table", lib.loc="/home/smorris/R/x86_64-pc-linux-gnu-library/3.5/")
+#a = sessionInfo()
+#print(a$otherPkgs[grep("data.table", a$otherPkgs)])
+#library(stringr)
 
 usage=function()
 {
@@ -29,10 +36,52 @@ usage=function()
 	print(noquote("num.thin: [1,2,...]"))
 }
 
-temp=commandArgs()
+#temp=commandArgs()
+#recipient.pops=as.character(temp[3])
+#save.file.props=as.character(temp[4])
+#copyvector.file=as.character(temp[5])
+#newnames=as.character(temp[5])
+#newnames=unlist(stringr::str_split(newnames, pattern=","))
+#print(newnames)
 
-param.infile=as.character(temp[2])
-if (param.infile=="help"){usage();q(save='no')}
+option_list = list(
+	optparse::make_option(c("-c", "--chunklengths"), 
+		type="character", 
+		default=NULL, 
+		help="matrix of chunklengths. no default - required", 
+		metavar="character"), 
+	optparse::make_option(c("-p", "--parameters"), 
+		type="character", 
+		help="parameter file. no default - required", 
+		metavar="character"), 
+	optparse::make_option(c("-t", "--target"), 
+		type="character", 
+		default="NULL", 
+		help="target individual. no default - required", 
+		metavar="character"), 
+	optparse::make_option(c("-o", "--output"), 
+		type="character", 
+		default=NULL, 
+		help="Output file path. no default - required", 
+		metavar="character"),
+    optparse::make_option(c("-i", "--idfile"),
+        type="character",
+        default=NULL,
+        help="idfile. no default - required",
+        metavar="character")
+    );
+
+opt_parser = optparse::OptionParser(option_list=option_list);
+opt = optparse::parse_args(opt_parser);
+
+#print(opt)
+
+param.infile = opt$parameters
+recipient.pops = opt$target
+save.file.props = opt$output
+copyvector.file = opt$chunklengths
+id.file = opt$idfile
+
 
 ######################################
 ## COMMAND LINE CHECK AND READ IN:
@@ -40,44 +89,51 @@ if (param.infile=="help"){usage();q(save='no')}
 error.input.message=function(file.name)
   {
     print(paste("Something wrong with input file ",file.name,". See below. Exiting...",sep=''))
-    usage()
-    q(save='no')
+    #usage()
+    #q(save='no')
   }
-line.check=function(file.name,skip.val,match.val)
-  {
-    if (as.character(read.table(file.name,skip=skip.val,nrows=1,as.is=TRUE)[1]) != as.character(match.val))
-      {
+
+line.check=function(file.name,skip.val,match.val) {
+    if (as.character(read.table(file.name,skip=skip.val,nrows=1,as.is=TRUE)[1]) != as.character(match.val)) {
         error.input.message(file.name)
       }
     if (as.character(read.table(file.name,skip=skip.val,nrows=1,as.is=TRUE)[1]) == as.character(match.val))
       return(read.table(file.name,skip=skip.val,nrows=1,as.is=TRUE)[2:length(read.table(file.name,skip=skip.val,nrows=1,as.is=TRUE))])
   }
 
-          ## line read in and checks:
+## line read in and checks:
 self.copy.ind=as.integer(line.check(param.infile,0,"self.copy.ind:"))
 if (length(self.copy.ind)!=1 || (self.copy.ind!=0 && self.copy.ind!=1)) error.input.message(param.infile)
+
 num.pops=as.integer(line.check(param.infile,1,"num.surrogates:"))
 if (length(num.pops)!=1 || num.pops<=1) error.input.message(param.infile)
+
 surr.exp=as.integer(line.check(param.infile,2,"exp.num.surrogates:"))
 if (length(surr.exp)!=1 || surr.exp<=0) error.input.message(param.infile)
-id.file=as.character(line.check(param.infile,3,"input.file.ids:"))
+
 if (length(id.file)!=1) error.input.message(param.infile)
-copyvector.file=as.character(line.check(param.infile,4,"input.file.copyvectors:"))
+
 if (length(copyvector.file)!=1) error.input.message(param.infile)
-save.file.props=as.character(line.check(param.infile,5,"save.file:"))
+
 if (length(save.file.props)!=1) error.input.message(param.infile)
+
 donor.pops.all=unique(as.character(line.check(param.infile,6,"copyvector.popnames:")))
 if (length(donor.pops.all)<=1) error.input.message(param.infile)
+
 newnames=as.character(line.check(param.infile,7,"surrogate.popnames:"))
 if (length(unique(newnames))<=1) error.input.message(param.infile)
-recipient.pops=as.character(line.check(param.infile,8,"target.popnames:"))
+
 if (length(recipient.pops)<=0) error.input.message(param.infile)
+
 num.slots = as.integer(line.check(param.infile,9,"num.slots:"))
 if (length(num.slots)!=1 || num.slots <= 1) error.input.message(param.infile)
+
 num.runs = as.integer(line.check(param.infile,10,"num.iterations:"))
 if (length(num.runs)!=1 || num.runs <= 1) error.input.message(param.infile)
+
 burn.in = as.integer(line.check(param.infile,11,"num.burnin:"))
 if (length(burn.in)!=1 || burn.in <= 1) error.input.message(param.infile)
+
 thin.val = as.integer(line.check(param.infile,12,"num.thin:"))
 if (length(thin.val)!=1 || thin.val <= 1) error.input.message(param.infile)
 
@@ -117,6 +173,7 @@ sourcefind=function(target.vec,surr.mat,num.pops,surr.exp,num.slots,num.runs,bur
 	num.sample=0
 	for (m in 1:num.runs)
 	{
+		#cat(paste0("\r", (m / num.runs)*100), "%\n")
 		#ind.to.replace=as.integer(sample(as.character(unique(surr.tochoose)),pops.toreplace,replace=T))
 		ind.to.replace=as.integer(sample(as.character(sort(unique(surr.tochoose))),pops.toreplace,prob=table(sort(unique(surr.tochoose)))/num.slots,replace=T))
 		for (i in 1:pops.toreplace)
@@ -190,8 +247,10 @@ if (length(dim(id.mat))==0)
 	q(save='no')
 }
 
-                      ## GET RAW COPY PROPS FOR ALL DONORS:
-probs=read.table(copyvector.file,header=TRUE,check.names=FALSE)
+
+## GET RAW COPY PROPS FOR ALL DONORS:
+#probs=read.table(copyvector.file, header=T,check.names=FALSE)
+probs=as.data.frame(data.table::fread(copyvector.file,header=T))
 rownames.copyvector=as.character(probs[,1])
 colnames.copyvector=as.character(read.table(copyvector.file,as.is=TRUE,nrows=1,check.names=FALSE)[-1])
 for (i in 1:length(donor.pops.all))
